@@ -1,84 +1,113 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text.RegularExpressions;
 
-namespace Lab8_Variant10
+namespace Lab8_Variant10_Improved
 {
-    // Клас, що інкапсулює логіку пошуку абревіатур
-    public class AbbreviationFinder
+    // === Константи з шаблонами ===
+    public static class Patterns
     {
-        // Регулярний вираз як константа (можна змінити для інших правил)
-        private readonly Regex _abbrRegex;
+        // Lookaround: шукає великі букви (мінімум 2), опціонально + або #, без чистих чисел
+        public const string Abbreviation = @"(?<![A-Za-z0-9])(?=[A-Za-z]*[A-Z])[A-Z]{2,}[A-Z0-9]*(?:\+{1,}|#{1,})?(?![A-Za-z0-9])";
 
-        public AbbreviationFinder()
+        // IPv4 (простий варіант)
+        public const string IP = @"(?<!\d)(?:\d{1,3}\.){3}\d{1,3}(?!\d)";
+
+        // Дата у форматі дд.мм.рр або дд/мм/рр
+        public const string Date = @"\b\d{1,2}([./-])\d{1,2}\1\d{2,4}\b";
+    }
+
+    // === Клас пошуку за різними шаблонами ===
+    public class RegexSearcher
+    {
+        private readonly Dictionary<string, Regex> _patterns;
+
+        public RegexSearcher(bool ignoreCase = false)
         {
-            // Пошук: великі літери або цифри, опціонально # або + в кінці
-            _abbrRegex = new Regex(@"\b[A-Z0-9]{1,}(?:[#\+]{1,})?\b", RegexOptions.Compiled);
+            var options = RegexOptions.Compiled;
+            if (ignoreCase) options |= RegexOptions.IgnoreCase;
+
+            _patterns = new Dictionary<string, Regex>
+            {
+                { "абревіатура", new Regex(Patterns.Abbreviation, options) },
+                { "ip-адреса",   new Regex(Patterns.IP, options) },
+                { "дата",        new Regex(Patterns.Date, options) }
+            };
         }
 
-        // Повертає список знайдених унікальних абревіатур у порядку першої появи
-        public IList<string> FindAbbreviations(string text)
+        // Загальний метод пошуку
+        public Dictionary<string, List<string>> FindAll(string text)
         {
-            if (text == null) throw new ArgumentNullException(nameof(text));
-
-            var matches = _abbrRegex.Matches(text);
-            var result = new List<string>();
-            var seen = new HashSet<string>();
-
-            foreach (Match m in matches)
+            var result = new Dictionary<string, List<string>>();
+            foreach (var kv in _patterns)
             {
-                var value = m.Value;
-                // Фільтруємо "звичайні" слова, якщо треба:
-                // наприклад виключити слова довші ніж 1 символ, що починаються з маленької букви — тут ми вже вимагаємо великі
-                if (!seen.Contains(value))
-                {
-                    seen.Add(value);
-                    result.Add(value);
-                }
+                var matches = kv.Value.Matches(text)
+                    .Cast<Match>()
+                    .Select(m => m.Value)
+                    .Distinct()
+                    .ToList();
+                result[kv.Key] = matches;
             }
-
             return result;
         }
     }
 
     class Program
     {
-        static void Main(string[] args)
+        static void Main()
         {
-            Console.WriteLine("ЛР8 варіант 10 — пошук абревіатур (наприклад: C#, C++, HTML, JSON).");
-            Console.WriteLine("Введіть шлях до файлу з текстом або вставте текст і натисніть Enter (порожній рядок — приклад):");
+            Console.OutputEncoding = System.Text.Encoding.UTF8;
+            Console.WriteLine("ЛР8 — Пошук за кількома шаблонами (варіант 10)\n");
 
-            string input = Console.ReadLine();
+            Console.WriteLine("Введіть шлях до файлу або залиште порожнім для прикладу:");
+            string? input = Console.ReadLine();
 
             string text;
             if (string.IsNullOrWhiteSpace(input))
             {
-                // Приклад тексту
-                text = "Приклад: Ми використовуємо C#, C++ та HTML. API повертає JSON. Також є версія G2 та ID123.";
-                Console.WriteLine("Використовується прикладний текст:\n" + text);
+                text = "Приклад: Ми використовуємо C#, C++ і HTML. API повертає JSON.\n" +
+                       "Дата публікації: 12.05.2024. Сервер IP: 192.168.0.1.";
+                Console.WriteLine("\nВикористовується прикладовий текст:\n" + text);
             }
             else if (File.Exists(input))
             {
-                text = File.ReadAllText(input);
-                Console.WriteLine("Файл прочитано.");
+                try
+                {
+                    text = File.ReadAllText(input);
+                    Console.WriteLine("Файл успішно прочитано.\n");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"Помилка читання файлу: {ex.Message}");
+                    return;
+                }
             }
             else
             {
-                // Беремо введений рядок як текст
-                text = input;
+                Console.WriteLine("Файл не знайдено. Використовується прикладовий текст.\n");
+                text = "Тестовий текст із C++, IP: 10.0.0.2, дата 01/01/2025.";
             }
 
-            var finder = new AbbreviationFinder();
-            var found = finder.FindAbbreviations(text);
+            var searcher = new RegexSearcher(ignoreCase: false);
+            var results = searcher.FindAll(text);
 
-            Console.WriteLine("\nЗнайдені абревіатури (" + found.Count + "):");
-            foreach (var a in found)
+            Console.WriteLine("Результати пошуку:");
+            foreach (var kv in results)
             {
-                Console.WriteLine(" - " + a);
+                Console.WriteLine($"\nТип: {kv.Key}");
+                if (kv.Value.Any())
+                {
+                    Console.WriteLine($"Знайдено ({kv.Value.Count}): {string.Join(", ", kv.Value)}");
+                }
+                else
+                {
+                    Console.WriteLine("Не знайдено.");
+                }
             }
 
-            Console.WriteLine("\nГотово. Натисніть будь-яку клавішу для виходу...");
+            Console.WriteLine("\n--- Готово ---");
             Console.ReadKey();
         }
     }
